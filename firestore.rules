@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signedIn() { return request.auth != null; }
+    function corp() { return signedIn() && request.auth.token.email.matches('.*@kapower[.]us$'); }
+    function me() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
+    function active() { return corp() && exists(/databases/$(db)/documents/users/$(request.auth.uid)) && me().status == 'active'; }
+    function admin() { return active() && me().role in ['admin','super_admin']; }
+    function bootstrap() { return request.auth.token.email == 'siddharth.bohara@kapower.us'; }
+
+    match /users/{uid} {
+      // pending users can read ONLY their own doc; active members can read teammates (for assignee pickers)
+      allow read: if corp() && (request.auth.uid == uid || active());
+      allow create: if corp() && request.auth.uid == uid && request.resource.data.uid == uid
+        && ((request.resource.data.role == 'member' && request.resource.data.status == 'pending')
+            || (bootstrap() && request.resource.data.role == 'admin' && request.resource.data.status == 'active'));
+      // only admins change status/role; only super_admin may change roles
+      allow update: if admin() && (request.resource.data.role == resource.data.role || me().role == 'super_admin');
+    }
+    match /work_logs/{id} {
+      allow read: if active() && (resource.data.userId == request.auth.uid || admin());
+      allow create: if active() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if active() && (resource.data.userId == request.auth.uid || admin());
+    }
+    match /personal_todos/{id} {
+      allow read, update, delete: if active() && resource.data.userId == request.auth.uid;
+      allow create: if active() && request.resource.data.userId == request.auth.uid;
+    }
+    match /kanban_tasks/{id} { allow read, write: if active(); }
+  }
+}
