@@ -6,26 +6,36 @@ service cloud.firestore {
     function me() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
     function active() { return corp() && exists(/databases/$(db)/documents/users/$(request.auth.uid)) && me().status == 'active'; }
     function admin() { return active() && me().role in ['admin','super_admin']; }
+    function superAdmin() { return active() && me().role == 'super_admin'; }
+    function seeAll() { return active() && me().role in ['admin','super_admin','viewer']; }
+    function canWrite() { return active() && me().role != 'viewer'; }
     function bootstrap() { return request.auth.token.email == 'siddharth.bohara@kapower.us'; }
 
     match /users/{uid} {
-      // pending users can read ONLY their own doc; active members can read teammates (for assignee pickers)
       allow read: if corp() && (request.auth.uid == uid || active());
       allow create: if corp() && request.auth.uid == uid && request.resource.data.uid == uid
         && ((request.resource.data.role == 'member' && request.resource.data.status == 'pending')
             || (bootstrap() && request.resource.data.role == 'admin' && request.resource.data.status == 'active'));
-      // only admins change status/role; only super_admin may change roles
       allow update: if admin() && (request.resource.data.role == resource.data.role || me().role == 'super_admin');
     }
     match /work_logs/{id} {
-      allow read: if active() && (resource.data.userId == request.auth.uid || admin());
-      allow create: if active() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if active() && (resource.data.userId == request.auth.uid || admin());
+      allow read: if seeAll() || (active() && resource.data.userId == request.auth.uid);
+      allow create: if canWrite() && request.resource.data.userId == request.auth.uid;
+      allow update: if canWrite() && (resource.data.userId == request.auth.uid || admin())
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if canWrite() && (resource.data.userId == request.auth.uid || admin());
     }
     match /personal_todos/{id} {
-      allow read, update, delete: if active() && resource.data.userId == request.auth.uid;
-      allow create: if active() && request.resource.data.userId == request.auth.uid;
+      allow read, update, delete: if canWrite() && resource.data.userId == request.auth.uid;
+      allow create: if canWrite() && request.resource.data.userId == request.auth.uid;
     }
-    match /kanban_tasks/{id} { allow read, write: if active(); }
+    match /kanban_tasks/{id} {
+      allow read: if active();
+      allow write: if canWrite();
+    }
+    match /config/{id} {
+      allow read: if active();
+      allow write: if superAdmin();
+    }
   }
 }
