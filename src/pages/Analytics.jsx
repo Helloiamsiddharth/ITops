@@ -43,18 +43,21 @@ export default function Analytics() {
   const cats = group(workView, 'category').sort((a, b) => b.hours - a.hours)
 
   const people = useMemo(() => Object.values(logs.reduce((m, l) => {
-    const r = m[l.userEmail] ||= { email: l.userEmail, hours: 0, tasks: 0, leave: 0, days: new Set(), cat: {} }
+    const r = m[l.userEmail] ||= { email: l.userEmail, hours: 0, tasks: 0, leave: 0, credit: 0, days: new Set(), udays: new Set(), cat: {} }
     const lv = leaveOf(l)
-    if (lv) { r.leave += lv; return m }
+      r.udays.add(l.date)
+    if (lv) { r.leave += lv; r.credit += lv * TARGET; return m }
     r.hours += l.hoursSpent; r.tasks++; r.days.add(l.date)
     r.cat[l.category] = (r.cat[l.category] || 0) + l.hoursSpent; return m }, {})).sort((a, b) => b.hours - a.hours), [logs])
   const pv = who ? people.filter(p => p.email === who) : people
   const maxH = people[0]?.hours || 1
-  const activeDays = pv.reduce((s, p) => s + p.days.size, 0) || 1
+  const credit = pv.reduce((s, p) => s + p.credit, 0)
+  const utilDays = pv.reduce((s, p) => s + p.udays.size, 0) || 1
+  const utilPct = Math.round((total + credit) / (utilDays * TARGET) * 100)
   const perMember = pv.filter(p => p.hours > 0).map(p => ({ name: p.email.split('@')[0], ...Object.fromEntries(Object.entries(p.cat).map(([k, v]) => [k, +v.toFixed(2)])) }))
   const btn = 'px-3 py-1.5 rounded-lg border bg-white hover:bg-slate-100 text-sm transition'
   const timeCell = l => leaveOf(l)
-    ? <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">{l.entryType === 'full_leave' ? 'Full leave' : 'Half leave'}</span> : fmt(l.hoursSpent)
+    ? <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">{l.entryType === 'full_leave' ? 'Full leave' : 'Half leave'} · {leaveOf(l) * TARGET}h</span> : fmt(l.hoursSpent)
 
   return (
     <div className="space-y-4">
@@ -79,7 +82,7 @@ export default function Analytics() {
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <Card t="Total work hours" v={total.toFixed(1)} sub={`${workView.length} entries`} />
         <Card t="Avg hrs / member" v={(total / (pv.filter(p => p.hours > 0).length || 1)).toFixed(1)} sub={`${pv.length} ${pv.length === 1 ? 'person' : 'people'}`} />
-        <Card t="Avg hrs / active day" v={(total / activeDays).toFixed(1)} sub={`${Math.round(total / activeDays / TARGET * 100)}% of ${TARGET}h target`} />
+        <Card t="Utilisation" v={`${utilPct}%`} sub={`${((total + credit) / utilDays).toFixed(1)}h/day incl. ${credit}h leave`} />
         <Card t="Ticket : non-ticket" v={`${ticketHrs.toFixed(0)}h : ${(total - ticketHrs).toFixed(0)}h`} sub={`${total ? Math.round(ticketHrs / total * 100) : 0}% ticket-linked`} />
         <Card t="Leave days" v={leaveTotal} sub="half = 0.5" />
       </div>
@@ -118,7 +121,7 @@ export default function Analytics() {
                 {p.leave > 0 && <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700 whitespace-nowrap">{p.leave} leave {p.leave === 1 ? 'day' : 'days'}</span>}
                 <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 transition-all" style={{ width: `${p.hours / maxH * 100}%` }} /></div>
                 <div className="w-24 text-right font-mono text-sm">{fmt(p.hours)}</div>
-                <div className="w-80 text-xs text-slate-500 hidden xl:block truncate">{p.tasks} {p.tasks === 1 ? 'entry' : 'entries'} · {p.days.size} {p.days.size === 1 ? 'day' : 'days'} · {perDay.toFixed(1)}h/day · {Math.round(perDay / TARGET * 100)}% util · {top}</div>
+                <div className="w-80 text-xs text-slate-500 hidden xl:block truncate">{p.tasks} {p.tasks === 1 ? 'entry' : 'entries'} · {p.days.size} {p.days.size === 1 ? 'day' : 'days'} · {perDay.toFixed(1)}h/day · {Math.round((p.hours + p.credit) / (p.udays.size * TARGET) * 100)}% util · {top}</div>
               </button>
               {open === p.email && (
                 <div className="pb-3 pl-9 overflow-x-auto">
