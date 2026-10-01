@@ -4,7 +4,7 @@ import { PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGri
 import { ChevronDown, ChevronRight, Download, Mail } from 'lucide-react'
 import { db } from '../lib/firebase'
 import { useConfig } from '../ConfigContext'
-import { logsToCSV, download, emailSummary } from '../lib/export'
+import { logsToCSV, download, emailSummary, leaveOf } from '../lib/export'
 
 const COLORS = ['#6366f1', '#16a34a', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#64748b']
 const pad = n => String(n).padStart(2, '0')
@@ -28,7 +28,7 @@ export default function Analytics() {
   const cfg = useConfig(), TARGET = cfg.targetHours || 8
   const [from, setFrom] = useState(off(-6)), [to, setTo] = useState(off(0))
   const [logs, setLogs] = useState([]), [loading, setLoading] = useState(true)
-  const [who, setWho] = useState(''), [open, setOpen] = useState(null), [summary, setSummary] = useState('')
+  const [who, setWho] = useState(''), [open, setOpen] = useState(null), [summary, setSummary] = useState(''), [showDesc, setShowDesc] = useState(false)
 
   useEffect(() => { (async () => {
     setLoading(true)
@@ -36,19 +36,25 @@ export default function Analytics() {
     setLogs(s.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false) })() }, [from, to])
 
   const view = who ? logs.filter(l => l.userEmail === who) : logs
-  const total = view.reduce((s, l) => s + l.hoursSpent, 0)
-  const ticketHrs = view.filter(l => l.ticketId).reduce((s, l) => s + l.hoursSpent, 0)
-  const cats = group(view, 'category').sort((a, b) => b.hours - a.hours)
+  const workView = view.filter(l => !leaveOf(l))
+  const leaveTotal = view.reduce((s, l) => s + leaveOf(l), 0)
+  const total = workView.reduce((s, l) => s + l.hoursSpent, 0)
+  const ticketHrs = workView.filter(l => l.ticketId).reduce((s, l) => s + l.hoursSpent, 0)
+  const cats = group(workView, 'category').sort((a, b) => b.hours - a.hours)
 
   const people = useMemo(() => Object.values(logs.reduce((m, l) => {
-    const r = m[l.userEmail] ||= { email: l.userEmail, hours: 0, tasks: 0, days: new Set(), cat: {} }
+    const r = m[l.userEmail] ||= { email: l.userEmail, hours: 0, tasks: 0, leave: 0, days: new Set(), cat: {} }
+    const lv = leaveOf(l)
+    if (lv) { r.leave += lv; return m }
     r.hours += l.hoursSpent; r.tasks++; r.days.add(l.date)
     r.cat[l.category] = (r.cat[l.category] || 0) + l.hoursSpent; return m }, {})).sort((a, b) => b.hours - a.hours), [logs])
   const pv = who ? people.filter(p => p.email === who) : people
   const maxH = people[0]?.hours || 1
   const activeDays = pv.reduce((s, p) => s + p.days.size, 0) || 1
-  const perMember = pv.map(p => ({ name: p.email.split('@')[0], ...Object.fromEntries(Object.entries(p.cat).map(([k, v]) => [k, +v.toFixed(2)])) }))
+  const perMember = pv.filter(p => p.hours > 0).map(p => ({ name: p.email.split('@')[0], ...Object.fromEntries(Object.entries(p.cat).map(([k, v]) => [k, +v.toFixed(2)])) }))
   const btn = 'px-3 py-1.5 rounded-lg border bg-white hover:bg-slate-100 text-sm transition'
+  const timeCell = l => leaveOf(l)
+    ? <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">{l.entryType === 'full_leave' ? 'Full leave' : 'Half leave'}</span> : fmt(l.hoursSpent)
 
   return (
     <div className="space-y-4">
@@ -62,6 +68,7 @@ export default function Analytics() {
         <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} className={btn} />
         <select value={who} onChange={e => setWho(e.target.value)} className={btn}>
           <option value="">Everyone</option>{people.map(p => <option key={p.email} value={p.email}>{p.email.split('@')[0]}</option>)}</select>
+        <label className={btn + ' flex items-center gap-2 cursor-pointer'}><input type="checkbox" checked={showDesc} onChange={e => setShowDesc(e.target.checked)} />Show descriptions</label>
         <div className="ml-auto flex gap-2">
           <button className={btn + ' flex items-center gap-1'} onClick={() => download(`worklogs_${from}_to_${to}.csv`, logsToCSV(view, cfg.fields))}><Download size={14} />CSV / Excel</button>
           <button className={btn + ' flex items-center gap-1'} onClick={() => setSummary(emailSummary(view, `${from} to ${to}`))}><Mail size={14} />Email summary</button>
@@ -69,11 +76,12 @@ export default function Analytics() {
       </div>
       {loading && <p className="text-sm text-slate-400">Loading…</p>}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card t="Total hours" v={total.toFixed(1)} sub={`${view.length} entries`} />
-        <Card t="Avg hrs / member" v={(total / (pv.length || 1)).toFixed(1)} sub={`${pv.length} ${pv.length === 1 ? 'person' : 'people'}`} />
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <Card t="Total work hours" v={total.toFixed(1)} sub={`${workView.length} entries`} />
+        <Card t="Avg hrs / member" v={(total / (pv.filter(p => p.hours > 0).length || 1)).toFixed(1)} sub={`${pv.length} ${pv.length === 1 ? 'person' : 'people'}`} />
         <Card t="Avg hrs / active day" v={(total / activeDays).toFixed(1)} sub={`${Math.round(total / activeDays / TARGET * 100)}% of ${TARGET}h target`} />
         <Card t="Ticket : non-ticket" v={`${ticketHrs.toFixed(0)}h : ${(total - ticketHrs).toFixed(0)}h`} sub={`${total ? Math.round(ticketHrs / total * 100) : 0}% ticket-linked`} />
+        <Card t="Leave days" v={leaveTotal} sub="half = 0.5" />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-3">
@@ -86,8 +94,8 @@ export default function Analytics() {
                 <span className="truncate flex-1" title={c.name}>{c.name}</span>
                 <span className="font-mono text-xs text-slate-500 whitespace-nowrap">{c.hours.toFixed(1)}h · {Math.round(c.hours / total * 100)}%</span></li>))}</ul>
           </div> : <Empty />}</div>
-        <Bar1 title="Resolution channel" data={group(view, 'channel')} />
-        <Bar1 title="Location spread" data={group(view, 'location')} />
+        <Bar1 title="Resolution channel" data={group(workView, 'channel')} />
+        <Bar1 title="Location spread" data={group(workView, 'location')} />
         <div className="bg-white p-4 rounded-xl shadow"><h3 className="font-semibold mb-2">Member hours by category <span className="text-xs font-normal text-slate-400">(colors match the donut)</span></h3>
           {perMember.length ? <div className="h-64"><ResponsiveContainer><BarChart data={perMember} margin={{ left: -18 }}>
             <CartesianGrid vertical={false} strokeOpacity={0.15} /><XAxis dataKey="name" fontSize={11} interval={0} tickFormatter={short} tickLine={false} />
@@ -100,22 +108,26 @@ export default function Analytics() {
         <h3 className="font-semibold mb-3">People · work logs by person</h3>
         {people.length === 0 && <p className="text-sm text-slate-400">No entries in this range.</p>}
         {people.map(p => {
-          const top = Object.entries(p.cat).sort((a, b) => b[1] - a[1])[0][0]
+          const top = Object.entries(p.cat).sort((a, b) => b[1] - a[1])[0]?.[0] || '—'
+          const perDay = p.days.size ? p.hours / p.days.size : 0
           return (
             <div key={p.email} className="border-b last:border-0">
               <button onClick={() => setOpen(open === p.email ? null : p.email)} className="w-full flex items-center gap-3 py-3 text-left hover:bg-slate-50 rounded-lg px-2 transition">
                 {open === p.email ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 <div className="w-40 truncate font-medium">{p.email.split('@')[0]}</div>
+                {p.leave > 0 && <span className="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700 whitespace-nowrap">{p.leave} leave {p.leave === 1 ? 'day' : 'days'}</span>}
                 <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 transition-all" style={{ width: `${p.hours / maxH * 100}%` }} /></div>
                 <div className="w-24 text-right font-mono text-sm">{fmt(p.hours)}</div>
-                <div className="w-80 text-xs text-slate-500 hidden xl:block truncate">{p.tasks} {p.tasks === 1 ? 'entry' : 'entries'} · {p.days.size} {p.days.size === 1 ? 'day' : 'days'} · {(p.hours / p.days.size).toFixed(1)}h/day · {Math.round(p.hours / p.days.size / TARGET * 100)}% util · {top}</div>
+                <div className="w-80 text-xs text-slate-500 hidden xl:block truncate">{p.tasks} {p.tasks === 1 ? 'entry' : 'entries'} · {p.days.size} {p.days.size === 1 ? 'day' : 'days'} · {perDay.toFixed(1)}h/day · {Math.round(perDay / TARGET * 100)}% util · {top}</div>
               </button>
               {open === p.email && (
                 <div className="pb-3 pl-9 overflow-x-auto">
-                  <table className="w-full text-sm"><thead><tr className="text-left text-slate-500 text-xs"><th className="py-1">Date</th><th>Task</th><th>Ticket</th><th>Channel</th><th>Category</th><th>Location</th><th className="text-right">Time</th></tr></thead>
+                  <table className="w-full text-sm"><thead><tr className="text-left text-slate-500 text-xs"><th className="py-1">Date</th><th>Task</th>{showDesc && <th>Description</th>}<th>Ticket</th><th>Channel</th><th>Category</th><th>Location</th><th className="text-right">Time</th></tr></thead>
                     <tbody>{logs.filter(l => l.userEmail === p.email).sort((a, b) => b.date.localeCompare(a.date)).map(l => (
-                      <tr key={l.id} className="border-t"><td className="py-1.5 pr-3 whitespace-nowrap">{l.date}</td><td className="pr-3">{l.title}</td><td className="pr-3">{l.ticketId}</td>
-                        <td className="pr-3">{l.channel}</td><td className="pr-3">{l.category}</td><td className="pr-3">{l.location}</td><td className="text-right font-mono whitespace-nowrap">{fmt(l.hoursSpent)}</td></tr>))}</tbody></table>
+                      <tr key={l.id} className="border-t align-top"><td className="py-1.5 pr-3 whitespace-nowrap">{l.date}</td><td className="pr-3">{l.title}</td>
+                        {showDesc && <td className="pr-3 min-w-[240px] max-w-md whitespace-pre-wrap text-slate-600">{l.description}</td>}
+                        <td className="pr-3">{l.ticketId}</td><td className="pr-3">{l.channel}</td><td className="pr-3">{l.category}</td><td className="pr-3">{l.location}</td>
+                        <td className="text-right font-mono whitespace-nowrap">{timeCell(l)}</td></tr>))}</tbody></table>
                 </div>)}
             </div>) })}
       </div>
