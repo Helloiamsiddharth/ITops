@@ -36,8 +36,10 @@ export default function Logger() {
   const daysLogged = new Set(monthLogs.filter(l => !leaveOf(l)).map(l => l.date)).size
   const ticketHrs = sum(monthLogs.filter(l => l.ticketId))
   const dayLogs = [...(byDate[sel] || [])].sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))
-  const dayHrs = sum(dayLogs), dayLeave = leaveSum(dayLogs)
-  const cap = Math.max(0, TARGET * (1 - dayLeave))
+  const dayWork = sum(dayLogs), dayLeave = leaveSum(dayLogs)
+  const credit = Math.min(1, dayLeave) * TARGET
+  const dayHrs = dayWork + credit
+  const cap = TARGET
 
   const first = new Date(month.getFullYear(), month.getMonth(), 1).getDay()
   const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
@@ -105,13 +107,13 @@ export default function Logger() {
           <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 mb-1">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d}>{d}</div>)}</div>
           <div className="grid grid-cols-7 gap-1">
             {cells.map((d, i) => d ? (() => {
-              const h = sum(byDate[d]), lv = leaveSum(byDate[d])
-              const cls = lv >= 1 ? 'bg-amber-100 hover:bg-amber-200' : heat(h, TARGET * (1 - lv))
+              const lv = Math.min(1, leaveSum(byDate[d])), h = sum(byDate[d]) + lv * TARGET
+              const cls = lv >= 1 ? 'bg-amber-100 hover:bg-amber-200' : heat(h, TARGET)
               return (
                 <button key={d} onClick={() => setSel(d)}
                   className={`h-16 rounded-lg border text-left p-1.5 transition ${cls} ${d === sel ? 'ring-2 ring-offset-1 ring-indigo-500' : ''} ${d === ymd(new Date()) ? 'border-indigo-500' : 'border-slate-200'}`}>
                   <div className="text-xs font-medium">{+d.slice(8)}</div>
-                  {lv >= 1 ? <div className="text-[11px] mt-1 text-amber-700">Leave</div> : <>
+                  {lv >= 1 ? <div className="text-[11px] mt-1 text-amber-700">Leave · {TARGET}h</div> : <>
                     {lv > 0 && <div className="text-[10px] text-amber-600 font-medium leading-none mt-0.5">½ leave</div>}
                     {h > 0 && <div className="text-[11px] mt-0.5">{h.toFixed(1)}h · {byDate[d].filter(l => !leaveOf(l)).length}</div>}</>}
                 </button>) })() : <div key={i} />)}
@@ -126,12 +128,11 @@ export default function Logger() {
             <h3 className="font-semibold">{new Date(sel + 'T00:00').toLocaleDateString('default', { weekday: 'long', day: 'numeric', month: 'short' })}</h3>
             <button onClick={() => setForm(blank(sel))} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-3 py-1.5 text-sm"><Plus size={14} />Add</button>
           </div>
-          {dayLeave >= 1
-            ? <div className="flex items-center gap-2 text-sm rounded-lg bg-amber-100 text-amber-700 px-3 py-2"><Palmtree size={16} />On full-day leave</div>
-            : <div>
-                <div className="flex justify-between text-xs text-slate-500 mb-1"><span>Utilisation{dayLeave > 0 ? ' (half-day leave)' : ''}</span><span>{fmt(dayHrs)} / {cap}h ({Math.round(dayHrs / cap * 100)}%)</span></div>
-                <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full transition-all ${dayHrs >= cap ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(100, dayHrs / cap * 100)}%` }} /></div>
-              </div>}
+          {dayLeave >= 1 && <div className="flex items-center gap-2 text-sm rounded-lg bg-amber-100 text-amber-700 px-3 py-2"><Palmtree size={16} />On full-day leave · counts as {TARGET}h</div>}
+          <div>
+            <div className="flex justify-between text-xs text-slate-500 mb-1"><span>Utilisation{credit > 0 ? ` (incl. ${credit}h leave)` : ''}</span><span>{fmt(dayHrs)} / {TARGET}h ({Math.round(dayHrs / TARGET * 100)}%)</span></div>
+            <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full transition-all ${dayHrs >= TARGET ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(100, dayHrs / TARGET * 100)}%` }} /></div>
+          </div>
           {dayLogs.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">No entries. Click Add to log work or leave for this day.</p>}
           {dayLogs.map(l => leaveOf(l) ? (
             <div key={l.id} className="border border-amber-300 bg-amber-100/60 rounded-lg p-3 text-sm">
@@ -172,7 +173,7 @@ export default function Logger() {
               <Field label="Date"><input className={inp} type="date" value={form.date} onChange={set('date')} /></Field>
               <Field label="Work location"><select className={inp} value={form.location} onChange={set('location')}>{withCur(cfg.locations, form.location).map(c => <option key={c}>{c}</option>)}</select></Field>
               <Field label="Note (optional)" span><textarea className={inp} rows={2} placeholder="Reason / cover arrangements" value={form.description} onChange={set('description')} /></Field>
-              <p className="col-span-2 text-xs text-slate-500">Leave adds no work hours. {form.entryType === 'half_leave' ? `Your expected work for the day drops to ${TARGET / 2}h.` : 'The day is marked as on leave.'}</p>
+              <p className="col-span-2 text-xs text-slate-500">Leave adds no work hours, but counts as {form.entryType === 'half_leave' ? TARGET / 2 : TARGET}h of utilisation for the day.</p>
             </> : <>
               <Field label="Task title *" span><input className={inp} autoFocus value={form.title} onChange={set('title')} /></Field>
               <Field label="Description *" span><textarea className={inp} rows={3} value={form.description} onChange={set('description')} /></Field>
