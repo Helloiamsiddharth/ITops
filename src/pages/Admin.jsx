@@ -8,6 +8,10 @@ export default function Admin() {
   const { isSuper } = useAuth(); const [users, setUsers] = useState([])
   useEffect(() => onSnapshot(collection(db, 'users'), s => setUsers(s.docs.map(d => d.data()))), [])
   const upd = (uid, patch) => updateDoc(doc(db, 'users', uid), patch)
+  const reset = async u => {
+  if (!confirm(`Send a password reset email to ${u.email}?`)) return
+  try { await sendPasswordResetEmail(auth, u.email); alert(`Reset link sent to ${u.email}`) } catch (e) { alert(e.message) }
+}
   const pending = users.filter(u => u.status === 'pending').length
   return (
     <div className="space-y-3">
@@ -24,6 +28,7 @@ export default function Admin() {
               <td><select disabled={!isSuper} value={u.role} onChange={e => upd(u.uid, { role: e.target.value })} className="border rounded-lg px-2 py-1 bg-white">
                 <option value="member">member</option><option value="viewer">viewer (read-only)</option><option value="admin">admin</option><option value="super_admin">super_admin</option></select></td>
               <td className="space-x-3 pr-3 text-right">{u.status !== 'active' && <button className="text-green-600" onClick={() => upd(u.uid, { status: 'active' })}>Approve</button>}
+                <button className="text-blue-600" onClick={() => reset(u)}>Reset password</button>
                 {u.status !== 'rejected' && <button className="text-red-600" onClick={() => upd(u.uid, { status: 'rejected' })}>Reject</button>}</td>
             </tr>))}</tbody>
         </table>
