@@ -8,6 +8,7 @@ import Kanban from './pages/Kanban'
 import Analytics from './pages/Analytics'
 import Admin from './pages/Admin'
 import Settings from './pages/Settings'
+import ChangePassword from './pages/ChangePassword'
 
 const NAV = [
   { to: '/', label: 'Work Log', Icon: ClipboardList, show: a => a.canWrite },
@@ -26,6 +27,7 @@ export default function App() {
 
   if (loading) return <div className="min-h-screen grid place-items-center"><Activity className="animate-pulse text-indigo-500" size={36} /></div>
   if (!user || !profile) return <Login />
+  if (profile.mustChangePassword) return <ChangePassword />
   if (profile.status !== 'active') return (
     <div className="max-w-md mx-auto mt-24 p-8 bg-white rounded-2xl shadow text-center">
       <h1 className="text-xl font-semibold mb-2">{profile.status === 'rejected' ? 'Access denied' : 'Awaiting approval'}</h1>
