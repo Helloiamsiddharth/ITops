@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { collection, onSnapshot, updateDoc, doc } from 'firebase/firestore'
-import { db } from '../lib/firebase'
+import { sendPasswordResetEmail } from 'firebase/auth'
+import { db, auth } from '../lib/firebase'
 import { useAuth } from '../AuthContext'
 const BADGE = { active: 'bg-green-100 text-green-700', pending: 'bg-amber-100 text-amber-700', rejected: 'bg-red-100 text-red-700' }
 export default function Admin() {
